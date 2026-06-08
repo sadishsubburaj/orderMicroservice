@@ -2,12 +2,14 @@ package com.example.order_service.service;
 
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.*;
 
 import com.example.order_service.dto.OrderRequest;
 import com.example.order_service.dto.PaymentRequest;
 import com.example.order_service.dto.PaymentResponse;
 import com.example.order_service.entity.Order;
+import com.example.order_service.event.OrderCreateEvent;
 import com.example.order_service.repository.OrderRepository;
 
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
@@ -22,6 +24,8 @@ public class OrderService {
 
     private final OrderRepository repository;
     private final PaymentClient paymentClient;
+    private boolean useFeign = false;
+    private final OrderEventProducer producer;
 
     @CircuitBreaker(name = "paymentServiceCB", fallbackMethod = "paymentFallback")
     public Order create(OrderRequest request) {
@@ -31,10 +35,19 @@ public class OrderService {
         order.setProductName(request.productName());
         order.setQuantity(request.quantity());
         order.setPrice(request.price());
+
         Order savedOrder = repository.save(order);
-        PaymentRequest paymentRequest = new PaymentRequest(savedOrder.getId(), savedOrder.getPrice());
-        PaymentResponse paymentResponse = paymentClient.createPayment(paymentRequest);
-        System.out.println("*************###" + paymentResponse.getStatus());
+        if (useFeign) {
+            PaymentRequest paymentRequest = new PaymentRequest(savedOrder.getId(), savedOrder.getPrice());
+            PaymentResponse paymentResponse = paymentClient.createPayment(paymentRequest);
+            System.out.println("*************###" + paymentResponse.getStatus());
+
+        } else {
+            OrderCreateEvent event = new OrderCreateEvent(savedOrder.getId(), savedOrder.getProductName(),
+                    savedOrder.getQuantity(),
+                    savedOrder.getPrice());
+            producer.publish(event);
+        }
         return savedOrder;
 
     }
